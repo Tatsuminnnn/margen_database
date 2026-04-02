@@ -2412,8 +2412,8 @@ def case_entry_page():
             patients_data["discharge_destination"] = selectbox_select(
                 "退院先", get_codebook("discharge_destination"), "dischg_dest", p.get("discharge_destination"))
 
-        # --- 術後合併症 ---
-            # ── 食道 周術期経過 ──
+        # ── 食道 周術期経過 ──
+        if is_eso:
             eso_course_data = {}
             section_card("食道 周術期経過", "teal")
             with st.expander("📋 食事・ドレーン・ICU", expanded=False):
@@ -3253,154 +3253,224 @@ def case_entry_page():
     # GISTは疾患分類から削除されたが、将来の拡張のためコードは残す
 
     # ==========================================================
-    # Tab: 腫瘍マーカー
+    # Tab: 血液検査
     # ==========================================================
     tm_tab_idx = 7
     with tabs[tm_tab_idx]:
-        st.markdown("### 腫瘍マーカー")
-        st.caption("術後初回外来時（ベースライン）と再発確認時のみ記録")
+        st.markdown("### 血液検査")
+        st.caption("術前・術後初回外来・再発時は必須。その他は任意で複数回記録可。手入力または検査値読取からインポート。")
 
-        # 既存データ読み込み
-        existing_markers = []
+        # --- タイミング定義 ---
+        _BL_TIMING_OPTIONS = [
+            ("preop", "術前"),
+            ("postop_first", "術後初回外来"),
+            ("recurrence", "再発時"),
+            ("other", "その他"),
+        ]
+        _BL_TIMING_MAP = dict(_BL_TIMING_OPTIONS)
+
+        # --- 検査項目定義 ---
+        _BL_CBC_FIELDS = [
+            ("wbc", "WBC", "/μL"), ("rbc", "RBC", "×10⁴/μL"), ("hgb", "Hb", "g/dL"),
+            ("hct", "Ht", "%"), ("plt", "Plt", "×10⁴/μL"), ("neut", "Neut", "%"),
+            ("lymph", "Lymph", "%"), ("mono", "Mono", "%"),
+        ]
+        _BL_BIOCHEM_FIELDS = [
+            ("tp", "TP", "g/dL"), ("alb", "Alb", "g/dL"),
+            ("t_bil", "T-Bil", "mg/dL"), ("d_bil", "D-Bil", "mg/dL"),
+            ("ast", "AST", "U/L"), ("alt", "ALT", "U/L"),
+            ("ldh", "LDH", "U/L"), ("alp", "ALP", "U/L"),
+            ("ggt", "γ-GTP", "U/L"), ("bun", "BUN", "mg/dL"),
+            ("cre", "Cre", "mg/dL"), ("na", "Na", "mEq/L"),
+            ("k", "K", "mEq/L"), ("cl", "Cl", "mEq/L"),
+            ("crp", "CRP", "mg/dL"), ("glu", "Glu", "mg/dL"),
+            ("hba1c", "HbA1c", "%"),
+        ]
+        _BL_COAG_FIELDS = [
+            ("pt_inr", "PT-INR", ""), ("aptt", "APTT", "秒"),
+            ("fib", "Fib", "mg/dL"), ("d_dimer", "D-dimer", "μg/mL"),
+        ]
+        _BL_TUMOR_FIELDS = [
+            ("cea", "CEA", "ng/mL"), ("ca199", "CA19-9", "U/mL"),
+            ("ca125", "CA125", "U/mL"), ("afp", "AFP", "ng/mL"),
+        ]
+        if not is_gastric:
+            _BL_TUMOR_FIELDS += [
+                ("p53_antibody", "p53抗体", "U/mL"), ("cyfra", "シフラ", "ng/mL"),
+                ("scc_ag", "SCC", "ng/mL"), ("kl6", "KL-6", "U/mL"),
+            ]
+        _BL_ALL_FIELDS = _BL_CBC_FIELDS + _BL_BIOCHEM_FIELDS + _BL_COAG_FIELDS + _BL_TUMOR_FIELDS
+
+        # --- 既存データ読み込み (tumor_markers + lab_results 統合) ---
+        all_lab_records = []
         if editing and patient_db_id:
             with get_db() as conn:
-                existing_markers = conn.execute(
+                # tumor_markers テーブル
+                tm_rows = conn.execute(
                     "SELECT * FROM tumor_markers WHERE patient_id=? ORDER BY measurement_date",
-                    (patient_db_id,)
-                ).fetchall()
-                existing_markers = [dict(r) for r in existing_markers]
+                    (patient_db_id,)).fetchall()
+                for r in tm_rows:
+                    rd = dict(r)
+                    rd["_source"] = "手入力"
+                    rd["_table"] = "tumor_markers"
+                    all_lab_records.append(rd)
+                # lab_results テーブル（検査値読取）
+                lr_rows = conn.execute(
+                    "SELECT * FROM lab_results WHERE patient_id=? ORDER BY sample_date",
+                    (patient_db_id,)).fetchall()
+                for r in lr_rows:
+                    rd = dict(r)
+                    rd["_source"] = rd.get("source_type", "OCR")
+                    rd["_table"] = "lab_results"
+                    # lab_results のカラム名を統一 (xxx_lab → xxx)
+                    for col_key, _, _ in _BL_ALL_FIELDS:
+                        lab_col = f"{col_key}_lab"
+                        if lab_col in rd and rd[lab_col] is not None and col_key not in rd:
+                            rd[col_key] = rd[lab_col]
+                    # timing / measurement_date 統一
+                    if "sample_date" in rd and "measurement_date" not in rd:
+                        rd["measurement_date"] = rd["sample_date"]
+                    all_lab_records.append(rd)
 
-        # --- 既存レコード表示 ---
-        if existing_markers:
-            for i, mk in enumerate(existing_markers):
-                timing_label = "ベースライン" if mk["timing"] == "baseline" else "再発時"
-                st.markdown(f"**{timing_label}** ({mk.get('measurement_date', '日付未設定')})")
-                if is_gastric:
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("CEA", f"{mk.get('cea', '-')}")
-                    c2.metric("CA19-9", f"{mk.get('ca199', '-')}")
-                    c3.metric("CA125", f"{mk.get('ca125', '-')}")
-                    c4.metric("AFP", f"{mk.get('afp', '-')}")
-                else:
-                    c1, c2, c3, c4, c5 = st.columns(5)
-                    c1.metric("p53抗体", f"{mk.get('p53_antibody', '-')}")
-                    c2.metric("シフラ", f"{mk.get('cyfra', '-')}")
-                    c3.metric("SCC", f"{mk.get('scc_ag', '-')}")
-                    c4.metric("AFP", f"{mk.get('afp', '-')}")
-                    c5.metric("KL-6", f"{mk.get('kl6', '-')}")
-                st.markdown("---")
+        # --- 既存データ表示（EXCEL方式） ---
+        if all_lab_records:
+            section_card("検査値一覧", "blue")
+            # DataFrame構築
+            _tbl_rows = []
+            for rec in all_lab_records:
+                row = {
+                    "測定日": rec.get("measurement_date", rec.get("sample_date", "-")),
+                    "タイミング": _BL_TIMING_MAP.get(rec.get("timing"), rec.get("timing", "-")),
+                    "ソース": rec.get("_source", "-"),
+                }
+                for col_key, col_label, _ in _BL_ALL_FIELDS:
+                    row[col_label] = rec.get(col_key)
+                row["備考"] = rec.get("notes", "")
+                _tbl_rows.append(row)
+            df_lab_all = pd.DataFrame(_tbl_rows)
+            st.dataframe(df_lab_all, use_container_width=True, hide_index=True)
 
-        # --- 新規マーカー入力 ---
-        section_card("新規マーカー入力", "blue")
-        tc1, tc2 = st.columns([1, 2])
-        with tc1:
-            tm_timing = st.selectbox("記録タイミング", ["baseline", "recurrence"],
-                format_func=lambda x: "術後初回（ベースライン）" if x == "baseline" else "再発確認時",
-                key="tm_timing")
-            tm_date = st.date_input("測定日", value=None, key="tm_date", format="YYYY/MM/DD")
+            # --- 推移グラフ ---
+            with st.expander("📈 検査値推移グラフ"):
+                _graph_items = {col_label: col_key for col_key, col_label, _ in _BL_ALL_FIELDS}
+                _sel_items = st.multiselect(
+                    "表示項目", list(_graph_items.keys()),
+                    default=["CEA", "CA19-9"] if is_gastric else ["SCC", "CEA"],
+                    key="lab_graph_sel")
+                if _sel_items:
+                    _graph_rows = []
+                    for rec in all_lab_records:
+                        d = rec.get("measurement_date", rec.get("sample_date"))
+                        if not d:
+                            continue
+                        for item_label in _sel_items:
+                            val = rec.get(_graph_items[item_label])
+                            if val is not None:
+                                try:
+                                    _graph_rows.append({
+                                        "日付": str(d), "項目": item_label, "値": float(val)
+                                    })
+                                except (ValueError, TypeError):
+                                    pass
+                    if _graph_rows:
+                        import altair as alt
+                        df_g = pd.DataFrame(_graph_rows)
+                        df_g["日付"] = pd.to_datetime(df_g["日付"])
+                        chart = alt.Chart(df_g).mark_line(point=True).encode(
+                            x=alt.X("日付:T", title="測定日"),
+                            y=alt.Y("値:Q", title="値"),
+                            color="項目:N",
+                            tooltip=["日付:T", "項目:N", "値:Q"],
+                        ).properties(height=350).interactive()
+                        st.altair_chart(chart, use_container_width=True)
+                    else:
+                        st.info("グラフ表示可能なデータがありません。")
+        else:
+            if editing and patient_db_id:
+                st.info("この患者の血液検査データはまだありません。")
 
-        with tc2:
-            if is_gastric:
-                mc1, mc2, mc3, mc4 = st.columns(4)
-                tm_cea = mc1.number_input("CEA (ng/mL)", min_value=0.0, value=None, key="tm_cea", format="%.2f")
-                tm_ca199 = mc2.number_input("CA19-9 (U/mL)", min_value=0.0, value=None, key="tm_ca199", format="%.2f")
-                tm_ca125 = mc3.number_input("CA125 (U/mL)", min_value=0.0, value=None, key="tm_ca125", format="%.2f")
-                tm_afp = mc4.number_input("AFP (ng/mL)", min_value=0.0, value=None, key="tm_afp", format="%.2f")
-            else:
-                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
-                tm_p53 = mc1.number_input("p53抗体 (U/mL)", min_value=0.0, value=None, key="tm_p53", format="%.2f")
-                tm_cyfra = mc2.number_input("シフラ (ng/mL)", min_value=0.0, value=None, key="tm_cyfra", format="%.2f")
-                tm_scc = mc3.number_input("SCC (ng/mL)", min_value=0.0, value=None, key="tm_scc", format="%.2f")
-                tm_afp = mc4.number_input("AFP (ng/mL)", min_value=0.0, value=None, key="tm_afp_e", format="%.2f")
-                tm_kl6 = mc5.number_input("KL-6 (U/mL)", min_value=0.0, value=None, key="tm_kl6", format="%.2f")
+        # --- 新規検査値入力 ---
+        st.markdown("---")
+        section_card("新規血液検査入力", "blue")
+        _tc1, _tc2, _tc3 = st.columns([1, 1, 2])
+        with _tc1:
+            tm_timing = st.selectbox("記録タイミング",
+                [k for k, _ in _BL_TIMING_OPTIONS],
+                format_func=lambda x: _BL_TIMING_MAP.get(x, x),
+                key="bl_timing")
+        with _tc2:
+            tm_date = st.date_input("測定日", value=None, key="bl_date", format="YYYY/MM/DD")
+        with _tc3:
+            tm_notes = st.text_input("備考", key="bl_notes", placeholder="特記事項")
 
-        tm_notes = st.text_input("備考", key="tm_notes", placeholder="特記事項")
+        # 末血
+        with st.expander("🩸 末梢血", expanded=False):
+            _cbc_cols = st.columns(4)
+            _cbc_vals = {}
+            for idx, (fkey, flabel, fsuffix) in enumerate(_BL_CBC_FIELDS):
+                with _cbc_cols[idx % 4]:
+                    _cbc_vals[fkey] = st.number_input(
+                        f"{flabel} ({fsuffix})" if fsuffix else flabel,
+                        min_value=0.0, value=None, key=f"bl_{fkey}", format="%.2f")
 
-        if st.button("腫瘍マーカーを追加保存", key="tm_save") and editing and patient_db_id:
-            tm_data = {
+        # 生化学
+        with st.expander("🧪 生化学", expanded=False):
+            _bio_cols = st.columns(4)
+            _bio_vals = {}
+            for idx, (fkey, flabel, fsuffix) in enumerate(_BL_BIOCHEM_FIELDS):
+                with _bio_cols[idx % 4]:
+                    _bio_vals[fkey] = st.number_input(
+                        f"{flabel} ({fsuffix})" if fsuffix else flabel,
+                        min_value=0.0, value=None, key=f"bl_{fkey}", format="%.2f")
+
+        # 凝固
+        with st.expander("🔬 凝固", expanded=False):
+            _coag_cols = st.columns(4)
+            _coag_vals = {}
+            for idx, (fkey, flabel, fsuffix) in enumerate(_BL_COAG_FIELDS):
+                with _coag_cols[idx % 4]:
+                    _coag_vals[fkey] = st.number_input(
+                        f"{flabel} ({fsuffix})" if fsuffix else flabel,
+                        min_value=0.0, value=None, key=f"bl_{fkey}", format="%.2f")
+
+        # 腫瘍マーカー
+        with st.expander("🎯 腫瘍マーカー", expanded=True):
+            _tm_cols = st.columns(4)
+            _tm_vals = {}
+            for idx, (fkey, flabel, fsuffix) in enumerate(_BL_TUMOR_FIELDS):
+                with _tm_cols[idx % 4]:
+                    _tm_vals[fkey] = st.number_input(
+                        f"{flabel} ({fsuffix})" if fsuffix else flabel,
+                        min_value=0.0, value=None, key=f"bl_{fkey}", format="%.2f")
+
+        if st.button("血液検査を保存", key="bl_save") and editing and patient_db_id:
+            bl_data = {
                 "patient_id": patient_db_id,
                 "timing": tm_timing,
                 "measurement_date": tm_date.strftime("%Y-%m-%d") if tm_date else None,
                 "notes": tm_notes or None,
                 "created_by": st.session_state.user["id"],
             }
-            if is_gastric:
-                tm_data.update({"cea": tm_cea, "ca199": tm_ca199, "ca125": tm_ca125, "afp": tm_afp})
-            else:
-                tm_data.update({"p53_antibody": tm_p53, "cyfra": tm_cyfra, "scc_ag": tm_scc,
-                                "afp": tm_afp, "kl6": tm_kl6})
+            # 全フィールドをまとめる
+            for vals_dict in [_cbc_vals, _bio_vals, _coag_vals, _tm_vals]:
+                for k, v in vals_dict.items():
+                    if v is not None:
+                        bl_data[k] = v
+
+            # ホワイトリスト
+            _BL_ALLOWED_COLS = frozenset(
+                ["patient_id", "timing", "measurement_date", "notes", "created_by"]
+                + [fk for fk, _, _ in _BL_ALL_FIELDS]
+            )
             with get_db() as conn:
-                # カラム名ホワイトリスト検証
-                _TM_ALLOWED_COLS = frozenset([
-                    "patient_id", "timing", "timing_date",
-                    "cea", "ca199", "ca125", "afp",
-                    "p53_antibody", "cyfra", "scc_ag", "kl6",
-                ])
-                for k in tm_data.keys():
-                    assert k in _TM_ALLOWED_COLS, f"Invalid column: {k}"
-                cols_str = ", ".join(tm_data.keys())
-                placeholders = ", ".join(["?"] * len(tm_data))
+                safe_data = {k: v for k, v in bl_data.items() if k in _BL_ALLOWED_COLS}
+                cols_str = ", ".join(safe_data.keys())
+                placeholders = ", ".join(["?"] * len(safe_data))
                 conn.execute(f"INSERT INTO tumor_markers ({cols_str}) VALUES ({placeholders})",
-                             list(tm_data.values()))
+                             list(safe_data.values()))
                 log_audit(conn, st.session_state.user["id"], "INSERT", "tumor_markers", patient_db_id)
-            st.success("✅ 腫瘍マーカーを保存しました")
+            st.success("✅ 血液検査データを保存しました")
             st.rerun()
-
-        # --- 検査読み取り (lab_results) からの検査値履歴 ---
-        if editing and patient_db_id:
-            st.markdown("---")
-            st.markdown("### 検査値履歴（検査読み取りデータ）")
-            st.caption("「検査読み取り」ページで OCR 保存した血液検査データの腫瘍マーカー抜粋")
-            with get_db() as conn:
-                lab_rows = conn.execute(
-                    "SELECT * FROM lab_results WHERE patient_id = ? ORDER BY sample_date DESC, created_at DESC",
-                    (patient_db_id,),
-                ).fetchall()
-            if lab_rows:
-                _tm_cols = ["cea_lab", "ca199_lab", "afp_lab", "ca125_lab"]
-                _lab_tm_labels = {"cea_lab": "CEA", "ca199_lab": "CA19-9", "afp_lab": "AFP", "ca125_lab": "CA125"}
-                _timing_map = {"preop": "術前", "postop": "術後", "recurrence": "再発時"}
-                lab_tm_data = []
-                for r in lab_rows:
-                    rd = dict(r)
-                    # 腫瘍マーカーが1つでも入っていれば表示
-                    if any(rd.get(c) is not None for c in _tm_cols):
-                        row_d = {
-                            "採取日": rd.get("sample_date", "-"),
-                            "タイミング": _timing_map.get(rd.get("timing"), rd.get("timing", "-")),
-                        }
-                        for c in _tm_cols:
-                            row_d[_lab_tm_labels[c]] = rd.get(c)
-                        row_d["ソース"] = rd.get("source_type", "-")
-                        lab_tm_data.append(row_d)
-
-                if lab_tm_data:
-                    st.dataframe(pd.DataFrame(lab_tm_data), use_container_width=True, hide_index=True)
-                else:
-                    st.info("腫瘍マーカーが含まれる検査データはまだありません。")
-
-                # 全検査値の詳細一覧（折りたたみ）
-                with st.expander("📊 全検査値一覧（CBC・生化学含む）"):
-                    from lab_reader import LAB_LABELS as _LR_LABELS
-                    _display_cols = ["sample_date", "timing", "source_type",
-                                     "wbc", "rbc", "hgb", "hct", "plt",
-                                     "tp", "alb", "t_bil", "ast", "alt", "crp",
-                                     "cea_lab", "ca199_lab", "afp_lab", "ca125_lab",
-                                     "created_at"]
-                    _col_rename = {c: _LR_LABELS.get(c, c) for c in _display_cols}
-                    _col_rename.update({"sample_date": "採取日", "timing": "タイミング",
-                                        "source_type": "ソース", "created_at": "登録日時"})
-                    full_data = []
-                    for r in lab_rows:
-                        rd = dict(r)
-                        full_data.append({_col_rename.get(c, c): rd.get(c) for c in _display_cols})
-                    df_lab = pd.DataFrame(full_data)
-                    if "タイミング" in df_lab.columns:
-                        df_lab["タイミング"] = df_lab["タイミング"].map(
-                            lambda x: _timing_map.get(x, x) if isinstance(x, str) else x)
-                    st.dataframe(df_lab, use_container_width=True, hide_index=True)
-            else:
-                st.info("この患者の検査値記録はまだありません。「検査読み取り」ページからOCRで取り込めます。")
 
     # ==========================================================
     # Phase承認フロー & 保存ボタン

@@ -1353,7 +1353,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS tumor_markers (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             patient_id      INTEGER REFERENCES patients(id) ON DELETE CASCADE,
-            timing          TEXT NOT NULL,   -- 'baseline' or 'recurrence'
+            timing          TEXT NOT NULL,   -- 'preop','postop_first','recurrence','other'
             measurement_date TEXT,
             -- 胃癌マーカー
             cea             REAL,
@@ -1929,6 +1929,46 @@ def init_db():
         # v7.0: NCD codebook検証 — 新規UIカラム
         ("eso_tumor",     "c_macroscopic_type_eso",  "INTEGER"),
         ("eso_pathology", "p_treatment_effect",      "INTEGER"),
+        # v8.0: 手術タブ改修
+        ("surgery", "op_transfusion_intra_autologous", "INTEGER"),
+        ("surgery", "op_fluid_volume_ml",              "INTEGER"),
+        ("surgery", "op_urine_output_ml",              "INTEGER"),
+        # comp_dge_grade / comp_pancreatic_fistula_grade: app.py側のf"comp_{suffix}_grade"パターンに合わせた新カラム
+        # 旧カラム comp_dge_isgps / comp_pancreatic_fistula_isgpf は使用停止
+        ("surgery", "comp_dge_grade",                  "INTEGER"),
+        ("surgery", "comp_pancreatic_fistula_grade",   "INTEGER"),
+        # v8.0: 病理 — リンパ節治療効果フリーテキスト
+        ("pathology", "p_ln_chemo_effect_text",        "TEXT"),
+        # v8.0: 血液検査タブ拡張 (tumor_markersテーブルに追加カラム)
+        ("tumor_markers", "wbc",          "REAL"),
+        ("tumor_markers", "rbc",          "REAL"),
+        ("tumor_markers", "hgb",          "REAL"),
+        ("tumor_markers", "hct",          "REAL"),
+        ("tumor_markers", "plt",          "REAL"),
+        ("tumor_markers", "neut",         "REAL"),
+        ("tumor_markers", "lymph",        "REAL"),
+        ("tumor_markers", "mono",         "REAL"),
+        ("tumor_markers", "tp",           "REAL"),
+        ("tumor_markers", "alb",          "REAL"),
+        ("tumor_markers", "t_bil",        "REAL"),
+        ("tumor_markers", "d_bil",        "REAL"),
+        ("tumor_markers", "ast",          "REAL"),
+        ("tumor_markers", "alt",          "REAL"),
+        ("tumor_markers", "ldh",          "REAL"),
+        ("tumor_markers", "alp",          "REAL"),
+        ("tumor_markers", "ggt",          "REAL"),
+        ("tumor_markers", "bun",          "REAL"),
+        ("tumor_markers", "cre",          "REAL"),
+        ("tumor_markers", "na",           "REAL"),
+        ("tumor_markers", "k",            "REAL"),
+        ("tumor_markers", "cl",           "REAL"),
+        ("tumor_markers", "crp",          "REAL"),
+        ("tumor_markers", "glu",          "REAL"),
+        ("tumor_markers", "hba1c",        "REAL"),
+        ("tumor_markers", "pt_inr",       "REAL"),
+        ("tumor_markers", "aptt",         "REAL"),
+        ("tumor_markers", "fib",          "REAL"),
+        ("tumor_markers", "d_dimer",      "REAL"),
     ]
     with get_db() as conn:
         for tbl, col, col_def in _migrations:
