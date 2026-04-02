@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Database (各環境でinit_dbが自動生成)
+*.db
+*.db-journal
+
+# Backups
+backups/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.venv/
+venv/
