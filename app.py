@@ -30,9 +30,15 @@ from codebook import get_codebook, populate_codebook, compute_stage, get_form_la
 from analytics import render_analytics_dashboard
 from smart_query import ask as smart_ask, check_llm_connection, EXAMPLE_QUESTIONS
 
+
+
+
+
+
 # ============================================================
 # 初期設定
 # ============================================================
+
 st.set_page_config(
     page_title="上部消化管症例登録DB",
     page_icon="🏥",
